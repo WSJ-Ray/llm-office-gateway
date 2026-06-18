@@ -1,0 +1,11 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.venv
+venv
+env
+*.md
+启动网关.template.bat
