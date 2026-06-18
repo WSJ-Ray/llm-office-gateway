@@ -1,0 +1,22 @@
+# 日志文件
+gateway_log.txt
+tunnel_*.txt
+lt_*.txt
+*.log
+
+# 运行脚本（包含 API Key 占位符 - 确保不提交真实 key）
+启动网关.bat
+start_gateway.ps1
+start_all.ps1
+start_litellm.ps1
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 遗留配置文件
+litellm_config.yaml
+
+# 环境文件
+.env
