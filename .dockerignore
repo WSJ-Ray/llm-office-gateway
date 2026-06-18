@@ -9,3 +9,9 @@ venv
 env
 *.md
 启动网关.template.bat
+data/
+static/
+demo.pen
+designs/
+web/node_modules/
+web/dist/

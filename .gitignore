@@ -54,3 +54,14 @@ Thumbs.db
 
 # ===== Docker 本地数据 =====
 docker-data/
+
+# ===== 数据/缓存 =====
+data/
+*.db
+*.sqlite3
+
+# ===== 前端 =====
+web/node_modules/
+web/dist/
+static/
+web/.vite/

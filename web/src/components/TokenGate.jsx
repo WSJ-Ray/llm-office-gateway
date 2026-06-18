@@ -1,0 +1,43 @@
+import { useState } from 'react'
+import { setToken, getToken, clearToken } from '../lib/api'
+import { useNavigate } from 'react-router-dom'
+
+export default function TokenGate({ children }) {
+  const [token, setLocal] = useState(getToken() || '')
+  const nav = useNavigate()
+
+  if (token) return children
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-bg">
+      <div className="w-[400px] bg-bg-card border border-border rounded-xl p-8 space-y-4">
+        <div>
+          <h1 className="text-lg font-semibold text-text-primary">Office Gateway</h1>
+          <p className="text-sm text-text-muted mt-1">输入网关令牌以访问控制台</p>
+        </div>
+        <input
+          id="token-input"
+          type="password"
+          placeholder="Gateway Token"
+          className="w-full px-3 py-2 bg-bg border border-border rounded-md text-sm text-text-primary focus:outline-none focus:border-primary"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              const v = e.currentTarget.value.trim()
+              if (v) { setToken(v); setLocal(v) }
+            }
+          }}
+        />
+        <button
+          onClick={() => {
+            const v = document.getElementById('token-input').value.trim()
+            if (v) { setToken(v); setLocal(v) }
+          }}
+          className="w-full py-2 bg-primary text-primary-fg rounded-md text-sm font-medium hover:opacity-90"
+        >
+          进入
+        </button>
+        <div className="text-[11px] text-text-tertiary text-center">默认令牌为 123，可在 gateway.py 中通过 GATEWAY_TOKEN 环境变量修改</div>
+      </div>
+    </div>
+  )
+}
