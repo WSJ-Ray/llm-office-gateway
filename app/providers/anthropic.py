@@ -28,6 +28,41 @@ def _empty_usage() -> dict:
     return {"input_tokens": 0, "output_tokens": 0, "cache_w": 0, "cache_r": 0}
 
 
+def _extract_usage(block: bytes, usage: dict) -> None:
+    """从一段 SSE 事件块中提取 usage，原地更新 ``usage``。
+
+    Anthropic 流式 SSE 在 ``message_start`` 携带 input/cache 字段，
+    在 ``message_delta`` 携带最终 output_tokens。解析失败或非相关事件时静默跳过。
+    """
+    data: bytes | None = None
+    for line in block.split(b"\n"):
+        line = line.strip()
+        if line.startswith(b"data:"):
+            data = line[5:].strip()
+            break
+    if not data:
+        return
+    try:
+        obj = json.loads(data)
+    except Exception:
+        return
+    etype = obj.get("type")
+    if etype == "message_start":
+        u = (obj.get("message") or {}).get("usage") or {}
+        if u.get("input_tokens"):
+            usage["input_tokens"] = u["input_tokens"]
+        if u.get("cache_creation_input_tokens"):
+            usage["cache_w"] = u["cache_creation_input_tokens"]
+        if u.get("cache_read_input_tokens"):
+            usage["cache_r"] = u["cache_read_input_tokens"]
+        if u.get("output_tokens"):
+            usage["output_tokens"] = u["output_tokens"]
+    elif etype == "message_delta":
+        u = obj.get("usage") or {}
+        if u.get("output_tokens") is not None:
+            usage["output_tokens"] = u["output_tokens"]
+
+
 def _model_list_urls(base: str) -> list[str]:
     """生成候选模型列表 URL。
 
@@ -126,6 +161,7 @@ class AnthropicAdapter(BaseProvider):
         usage = _empty_usage()
         t0 = time.time()
         first = True
+        buf = b""
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
                 "POST",
@@ -140,7 +176,13 @@ class AnthropicAdapter(BaseProvider):
                 async for chunk in resp.aiter_bytes():
                     if first and chunk:
                         first = False
+                    # 透传原始字节的同时，按 SSE 事件边界解析 usage
+                    buf += chunk
+                    while b"\n\n" in buf:
+                        event_block, buf = buf.split(b"\n\n", 1)
+                        _extract_usage(event_block, usage)
                     yield chunk, None
-        # best-effort usage extraction from tail
-        # (kept here only as a hint; the proxy layer manages its own tail parsing)
+        # 流结束后解析残余缓冲，兜底捕获末尾事件
+        if buf:
+            _extract_usage(buf, usage)
         yield b"", {**usage, "_eof": True, "ttft_ms": int((time.time() - t0) * 1000) if not first else 0}

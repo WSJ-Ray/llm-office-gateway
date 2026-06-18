@@ -119,6 +119,10 @@ def anthropic_to_openai_request(body: dict) -> dict:
         if k in body:
             out[k] = body[k]
 
+    # 流式请求要求上游在流尾下发 usage，否则 token 统计无法采集
+    if out.get("stream"):
+        out["stream_options"] = {"include_usage": True}
+
     tools = body.get("tools")
     if tools:
         out["tools"] = [_tool_to_openai(t) for t in tools if t.get("name")]
