@@ -1,9 +1,8 @@
-"""Anthropic-format /v1/* routes exposed to the Claude Office add-in.
+"""向 Claude Office 插件暴露的 Anthropic 格式 /v1/* 路由。
 
-Always speaks Anthropic Messages API. Model-based routing is resolved via
-``model_mappings``; unmapped models fall back to the default provider.
-A client_model may map to multiple enabled providers ordered by ``priority``;
-on upstream failure the gateway automatically fails over to the next candidate.
+始终使用 Anthropic Messages API 通信。模型路由通过 model_mappings 解析；
+未映射的模型回退到默认提供商。一个 client_model 可能映射到多个启用的提供商，
+按 priority 排序；上游失败时网关自动故障转移到下一个候选。
 """
 import json
 import time
@@ -25,7 +24,7 @@ def _log(msg: str) -> None:
 
 
 def _resolve_candidates(client_model: str) -> list[tuple[dict, str]]:
-    """返回 (provider, upstream_model) 候选队列，按 priority 升序。
+    """返回 (provider, upstream_model) 候选队列，按 priority 升序排列。
 
     无映射时回退到默认提供商，模型名透传。
     """
@@ -45,7 +44,7 @@ def _resolve_candidates(client_model: str) -> list[tuple[dict, str]]:
 async def list_models(request: Request):
     verify_auth(request)
     mappings = db.list_mappings()
-    # 去重：同一 client_model 只展示一次
+    # 去重：同一个 client_model 只展示一次
     seen: set[str] = set()
     data = []
     for m in mappings:
@@ -118,7 +117,7 @@ async def _proxy_nonstream(body, client_model, cands, t0):
             last_err = (usage.get("error") if isinstance(usage, dict) else "") or f"HTTP {status}"
             last_provider, last_upstream = provider, upstream_model
             continue
-        # 成功
+        # 成功：返回响应
         db.insert_log(
             {
                 "provider_id": provider["id"], "provider_name": provider["name"],
@@ -136,7 +135,7 @@ async def _proxy_nonstream(body, client_model, cands, t0):
         )
         return Response(content=content, status_code=status, media_type=ct)
 
-    # 全部失败
+    # 全部候选均失败
     db.insert_log(
         {
             "provider_id": last_provider["id"], "provider_name": last_provider["name"],
@@ -176,7 +175,7 @@ def _proxy_stream(body, client_model, cands, t0):
                         if meta and meta.get("status") and meta["status"] >= 400:
                             final_status = meta["status"]
                             final_error = (meta.get("error") or "")[:200]
-                            _log(f"[FAIL] stream {provider['name']}/{upstream_model} HTTP {final_status}")
+                            _log(f"[FAIL] stream {provider['name']}/{upstream_model} HTTP {final_status} {final_error}")
                             if is_last and chunk:
                                 yield chunk
                             break

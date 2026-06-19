@@ -3,7 +3,7 @@ from .config import GATEWAY_TOKEN
 
 
 def verify_auth(request: Request) -> str:
-    """Return the token if valid, raise 401 otherwise."""
+    """验证请求令牌，有效时返回 token，否则抛出 401。"""
     auth = request.headers.get("Authorization", "")
     x_api_key = request.headers.get("x-api-key", "")
     token = auth.replace("Bearer ", "") if auth.startswith("Bearer ") else x_api_key

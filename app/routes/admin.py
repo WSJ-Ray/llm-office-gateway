@@ -1,4 +1,4 @@
-"""Admin API: providers, mappings, stats, logs, preview-models."""
+"""管理后台 API：提供商管理、模型映射、统计数据、请求日志、模型预览。"""
 import time
 from typing import AsyncIterator
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/admin")
 
 
 def _mask_key(p: dict) -> dict:
-    """Return a copy with api_key masked for list endpoints."""
+    """返回列表时掩码处理 api_key，仅显示前后各 4 位。"""
     out = dict(p)
     k = out.get("api_key") or ""
     if len(k) > 8:
@@ -41,8 +41,8 @@ async def create_provider(payload: ProviderIn, request: Request):
     verify_auth(request)
     data = payload.model_dump()
     if data.get("is_default"):
-        # ensure only one default
-        pass  # enforced by set_default in update flow
+        # 确保默认提供商唯一性（由更新流程中的 set_default 保证）
+        pass
     pid = db.create_provider(data)
     if data.get("is_default"):
         db.set_default_provider(pid)
@@ -70,7 +70,7 @@ async def delete_provider(pid: int, request: Request):
 
 @router.post("/providers/{pid}/test")
 async def test_provider(pid: int, request: Request):
-    """Test connectivity by hitting the provider's list_models endpoint."""
+    """测试连通性：调用提供商的 list_models 端点验证连接。"""
     verify_auth(request)
     p = db.get_provider(pid)
     if not p:
@@ -87,7 +87,7 @@ async def test_provider(pid: int, request: Request):
 
 @router.get("/providers/{pid}/models")
 async def provider_models(pid: int, request: Request):
-    """拉取该提供商的上游模型 id 列表，供模型映射快速选用。"""
+    """拉取该提供商的上游模型 ID 列表，供模型映射页面快速选用。"""
     verify_auth(request)
     p = db.get_provider(pid)
     if not p:
@@ -103,7 +103,7 @@ async def provider_models(pid: int, request: Request):
 
 @router.post("/providers/preview-models")
 async def preview_models(payload: PreviewModelsIn, request: Request):
-    """Resolve models using a draft provider config (not yet saved)."""
+    """使用草稿状态的提供商配置（尚未保存）解析上游模型列表。"""
     verify_auth(request)
     fmt = payload.format
     if fmt not in REGISTRY:

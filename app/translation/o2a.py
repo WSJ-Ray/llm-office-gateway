@@ -1,4 +1,4 @@
-"""OpenAI Chat Completions response/chunk -> Anthropic Messages response/SSE."""
+"""OpenAI Chat Completions 响应/流式 chunk → Anthropic Messages 响应/SSE 转换器。"""
 import json
 import uuid
 from typing import AsyncIterator
@@ -28,7 +28,7 @@ def _sse(event: str, data: dict) -> bytes:
 
 
 def openai_to_anthropic_response(payload: dict, model: str) -> dict:
-    """Convert a non-streaming OpenAI Chat Completions response to an Anthropic Messages response."""
+    """将非流式的 OpenAI Chat Completions 响应翻译为 Anthropic Messages 响应。"""
     choice = (payload.get("choices") or [{}])[0]
     msg = choice.get("message") or {}
     content: list[dict] = []
@@ -69,9 +69,9 @@ def openai_to_anthropic_response(payload: dict, model: str) -> dict:
 async def openai_stream_to_anthropic_sse(
     openai_iter: AsyncIterator[bytes], model: str
 ) -> AsyncIterator[tuple[bytes, dict | None]]:
-    """Translate an OpenAI Chat Completions SSE stream to Anthropic Messages SSE.
+    """将 OpenAI Chat Completions SSE 流翻译为 Anthropic Messages SSE 流。
 
-    Yields (sse_bytes, usage_or_None). The final yielded usage dict marks end of stream.
+    产出 (SSE 字节, 用量或None)。最后一次产出的用量字典标记流结束。
     """
     msg_id = _new_id()
     sent_message_start = False
@@ -217,7 +217,7 @@ async def openai_stream_to_anthropic_sse(
                 "output_tokens": u.get("completion_tokens", 0),
             }
 
-    # finalize
+    # 收尾：关闭所有已打开的 content block
     if text_started:
         yield _sse(
             "content_block_stop",

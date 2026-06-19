@@ -1,9 +1,9 @@
-"""Anthropic request -> OpenAI Chat Completions request translation."""
+"""Anthropic 请求体 → OpenAI Chat Completions 请求体翻译器。"""
 from typing import Any
 
 
 def _tool_to_openai(t: dict) -> dict:
-    """Convert Anthropic tool def to OpenAI function tool def.
+    """将 Anthropic 工具定义转换为 OpenAI 函数工具定义。
 
     Anthropic: {name, description, input_schema}
     OpenAI:    {type:"function", function:{name, description, parameters}}
@@ -19,6 +19,10 @@ def _tool_to_openai(t: dict) -> dict:
 
 
 def _content_to_text(content: Any) -> str:
+    """提取 content 中的纯文本。
+
+    支持 string、list[{type:text}, ...]、list[{type:tool_result}, ...] 格式。
+    """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -37,12 +41,12 @@ def _content_to_text(content: Any) -> str:
 
 
 def anthropic_to_openai_request(body: dict) -> dict:
-    """Translate an Anthropic Messages request to OpenAI Chat Completions request."""
+    """将 Anthropic Messages 请求体翻译为 OpenAI Chat Completions 请求体。"""
     out: dict = {"model": body["model"]}
 
     messages: list[dict] = []
 
-    # system: string OR list[{type:text,text}, ...]
+    # system: 字符串 或 list[{type:text, text}, ...]
     system = body.get("system")
     if system:
         if isinstance(system, str):
@@ -61,7 +65,7 @@ def anthropic_to_openai_request(body: dict) -> dict:
             if isinstance(content, str):
                 messages.append({"role": "user", "content": content})
             else:
-                # collect tool_result blocks as 'tool' messages, rest as 'user' text
+                # 收集 tool_result 块作为 'tool' 消息，其余作为 'user' 文本
                 user_parts: list[str] = []
                 for b in (content or []):
                     btype = b.get("type")

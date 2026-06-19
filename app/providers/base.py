@@ -12,21 +12,21 @@ class BaseProvider(ABC):
 
     @abstractmethod
     async def list_models(self) -> list[dict]:
-        """Return Anthropic-format model list: [{id, type, display_name, created_at}, ...]"""
+        """返回上游模型列表，格式为 Anthropic 风格的模型列表：[{id, type, display_name, created_at}, ...]"""
 
     @abstractmethod
     async def send(self, body: dict) -> tuple[bytes, str, dict, int]:
-        """Non-streaming send.
+        """非流式发送请求。
 
-        Returns (response_bytes, content_type, usage, status).
-        status >= 400 表示上游失败，调用方可据此触发故障转移。
-        usage keys: input_tokens, output_tokens, cache_w, cache_r.
+        返回 (响应字节, 内容类型, 用量字典, HTTP 状态码)。
+        状态码 >= 400 表示上游请求失败，调用方可据此触发故障转移。
+        用量字典 key：input_tokens, output_tokens, cache_w, cache_r。
         """
 
     @abstractmethod
     async def stream(self, body: dict) -> AsyncIterator[tuple[bytes, dict | None]]:
-        """Streaming send. Yields (chunk_bytes, usage_or_None).
+        """流式发送请求。逐块产出 (SSE 字节, 用量或None)。
 
-        The adapter is responsible for emitting Anthropic-format SSE events.
-        The final yielded item is a tuple (b"", usage_dict) marking end of stream.
+        适配器负责产出 Anthropic 格式的 SSE 事件。
+        最后一次产出的元组为 (b"", 用量字典)，标记流结束。
         """
