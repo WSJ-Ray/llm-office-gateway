@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Providers from './pages/Providers'
 import Mappings from './pages/Mappings'
 import Logs from './pages/Logs'
+import Settings from './pages/Settings'
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/providers" element={<Providers />} />
           <Route path="/mappings" element={<Mappings />} />
           <Route path="/logs" element={<Logs />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
     </TokenGate>

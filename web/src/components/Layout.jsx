@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Server, Shuffle, ListTree, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { LayoutDashboard, Server, Shuffle, ListTree, Settings as SettingsIcon, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { cn } from '../lib/utils'
 import ThemeToggle from './ThemeToggle'
 
@@ -8,7 +8,7 @@ const items = [
   { to: '/', label: '仪表盘', icon: LayoutDashboard, end: true },
   { to: '/providers', label: '提供商', icon: Server },
   { to: '/mappings', label: '模型映射', icon: Shuffle },
-  { to: '/logs', label: '请求日志', icon: ListTree }
+  { to: '/logs', label: '请求日志', icon: ListTree },
 ]
 
 export default function Layout() {
@@ -78,6 +78,25 @@ export default function Layout() {
               </NavLink>
             </div>
           ))}
+          <div className="mt-2 pt-2 border-t border-border">
+            <div
+              ref={(el) => { itemRefs.current['/settings'] = el }}
+            >
+              <NavLink
+                to="/settings"
+                className={({ isActive }) => cn(
+                  'flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm',
+                  'transition-all duration-150 ease-out',
+                  isActive
+                    ? 'bg-bg-elevated text-text-primary'
+                    : 'text-text-secondary hover:bg-bg-elevated/50 hover:text-text-primary'
+                )}
+              >
+                <SettingsIcon size={16} className="shrink-0" />
+                <span>系统设置</span>
+              </NavLink>
+            </div>
+          </div>
         </nav>
         <div className="flex-1" />
         <div className="text-[11px] flex flex-col gap-1">

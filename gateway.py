@@ -8,10 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app import db
-from app.config import (
-    STATIC_DIR,
-    GATEWAY_TOKEN,
-)
+from app.config import STATIC_DIR
 from app.routes.proxy import router as proxy_router
 from app.routes.admin import router as admin_router
 
@@ -31,6 +28,12 @@ def create_app() -> FastAPI:
     db.init_db()
     db._migrate_total_input_tokens()
     _seed_defaults()
+
+    if not db.has_gateway_token():
+        print("=" * 60, flush=True)
+        print("  [首次启动] GATEWAY_TOKEN 未配置。", flush=True)
+        print("  请访问管理面板 → 系统设置 完成配置。", flush=True)
+        print("=" * 60, flush=True)
 
     app = FastAPI(title="Office Gateway")
     app.add_middleware(

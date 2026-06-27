@@ -1,9 +1,10 @@
-"""管理后台 API：提供商管理、模型映射、统计数据、请求日志、模型预览。"""
+"""管理后台 API：提供商管理、模型映射、统计数据、请求日志、模型预览、系统设置。"""
 import time
 from typing import AsyncIterator
 
 import httpx
 from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel
 
 from .. import db
 from ..auth import verify_auth
@@ -18,6 +19,11 @@ from ..schemas import (
 from ..providers import REGISTRY
 
 router = APIRouter(prefix="/admin")
+
+
+class SettingsIn(BaseModel):
+    gateway_token: str = ""
+    default_deepseek_key: str = ""
 
 
 def _mask_key(p: dict) -> dict:
@@ -214,3 +220,39 @@ async def stats(request: Request):
 async def logs(request: Request, limit: int = 100, offset: int = 0):
     verify_auth(request)
     return {"data": db.list_logs(limit=min(limit, 500), offset=max(offset, 0))}
+
+
+@router.get("/setup-status")
+async def setup_status(request: Request):
+    """返回网关令牌是否已配置，供前端判断首次引导流程。"""
+    return {"configured": db.has_gateway_token()}
+
+
+def _mask_setting(value: str) -> str:
+    """掩码处理敏感设置值，仅显示前后各 4 位。"""
+    if len(value) > 8:
+        return value[:4] + "*" * (len(value) - 8) + value[-4:]
+    return "*" * len(value) if value else ""
+
+
+@router.get("/settings")
+async def get_settings(request: Request):
+    """读取系统设置（敏感字段掩码后返回）。"""
+    all_settings = db.get_all_settings()
+    return {
+        "gateway_token": _mask_setting(all_settings.get(db.SETTING_GATEWAY_TOKEN, "")),
+        "default_deepseek_key": _mask_setting(all_settings.get(db.SETTING_DEEPSEEK_KEY, "")),
+        "has_token": bool(all_settings.get(db.SETTING_GATEWAY_TOKEN, "")),
+    }
+
+
+@router.put("/settings")
+async def update_settings(payload: SettingsIn, request: Request):
+    """更新系统设置。如果已有令牌，需要验证 auth；否则开放（首次设置阶段）。"""
+    if db.has_gateway_token():
+        verify_auth(request)
+    if payload.gateway_token:
+        db.set_setting(db.SETTING_GATEWAY_TOKEN, payload.gateway_token)
+    if payload.default_deepseek_key:
+        db.set_setting(db.SETTING_DEEPSEEK_KEY, payload.default_deepseek_key)
+    return {"ok": True}

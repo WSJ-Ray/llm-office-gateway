@@ -30,3 +30,11 @@ export const get = (p) => api(p)
 export const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body || {}) })
 export const put = (p, body) => api(p, { method: 'PUT', body: JSON.stringify(body || {}) })
 export const del = (p) => api(p, { method: 'DELETE' })
+
+// ── 设置项 ────────────────────────────────────────────────────────
+
+export const getSetupStatus = () => api('/admin/setup-status')
+
+export const getSettings = () => api('/admin/settings')
+
+export const updateSettings = (data) => api('/admin/settings', { method: 'PUT', body: JSON.stringify(data) })

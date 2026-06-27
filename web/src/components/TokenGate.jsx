@@ -1,10 +1,23 @@
 import { useState } from 'react'
-import { setToken, getToken, clearToken } from '../lib/api'
-import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Navigate } from 'react-router-dom'
+import { setToken, getToken, getSetupStatus } from '../lib/api'
 
 export default function TokenGate({ children }) {
   const [token, setLocal] = useState(getToken() || '')
-  const nav = useNavigate()
+  const { data: status, isLoading } = useQuery({
+    queryKey: ['setup-status'],
+    queryFn: getSetupStatus,
+    retry: false,
+  })
+
+  // 未完成加载时直接渲染 children（避免闪烁）
+  if (isLoading) return children
+
+  // 后端未配置令牌 → 引导到设置页
+  if (status && !status.configured) {
+    return <Navigate to="/settings" replace />
+  }
 
   if (token) return children
 
@@ -36,7 +49,7 @@ export default function TokenGate({ children }) {
         >
           进入
         </button>
-        <div className="text-[11px] text-text-tertiary text-center">默认令牌为 123，可在 gateway.py 中通过 GATEWAY_TOKEN 环境变量修改</div>
+        <div className="text-[11px] text-text-tertiary text-center">令牌在管理面板的「系统设置」中配置</div>
       </div>
     </div>
   )

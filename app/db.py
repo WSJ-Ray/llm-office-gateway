@@ -12,6 +12,10 @@ TZ = timezone(timedelta(hours=8))
 
 _lock = threading.Lock()
 
+# 设置项 key 常量
+SETTING_GATEWAY_TOKEN = "gateway_token"
+SETTING_DEEPSEEK_KEY = "default_deepseek_key"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS providers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +57,11 @@ CREATE TABLE IF NOT EXISTS request_logs (
     cache_w INTEGER DEFAULT 0,
     cache_r INTEGER DEFAULT 0,
     error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 """
 
@@ -389,3 +398,46 @@ def stats_by_provider() -> list[dict]:
         }
         for r in rows
     ]
+
+
+# ── 设置项 ──────────────────────────────────────────────────────────
+
+
+def get_setting(key: str) -> Optional[str]:
+    """读取单条设置，不存在返回 None。"""
+    with _lock, get_conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_setting(key: str, value: str) -> None:
+    """写入单条设置（UPSERT）。"""
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+
+def get_all_settings() -> dict:
+    """读取所有设置项。"""
+    with _lock, get_conn() as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    return {r["key"]: r["value"] for r in rows}
+
+
+def get_gateway_token() -> str:
+    """返回已配置的网关令牌，未配置返回空串。"""
+    v = get_setting(SETTING_GATEWAY_TOKEN)
+    return v or ""
+
+
+def get_default_deepseek_key() -> str:
+    """返回已配置的默认 DeepSeek API Key，未配置返回空串。"""
+    v = get_setting(SETTING_DEEPSEEK_KEY)
+    return v or ""
+
+
+def has_gateway_token() -> bool:
+    """网关令牌是否已配置。"""
+    return bool(get_gateway_token())
