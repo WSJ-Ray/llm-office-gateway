@@ -23,7 +23,6 @@ router = APIRouter(prefix="/admin")
 
 class SettingsIn(BaseModel):
     gateway_token: str = ""
-    default_deepseek_key: str = ""
 
 
 def _mask_key(p: dict) -> dict:
@@ -241,7 +240,6 @@ async def get_settings(request: Request):
     all_settings = db.get_all_settings()
     return {
         "gateway_token": _mask_setting(all_settings.get(db.SETTING_GATEWAY_TOKEN, "")),
-        "default_deepseek_key": _mask_setting(all_settings.get(db.SETTING_DEEPSEEK_KEY, "")),
         "has_token": bool(all_settings.get(db.SETTING_GATEWAY_TOKEN, "")),
     }
 
@@ -253,6 +251,4 @@ async def update_settings(payload: SettingsIn, request: Request):
         verify_auth(request)
     if payload.gateway_token:
         db.set_setting(db.SETTING_GATEWAY_TOKEN, payload.gateway_token)
-    if payload.default_deepseek_key:
-        db.set_setting(db.SETTING_DEEPSEEK_KEY, payload.default_deepseek_key)
     return {"ok": True}

@@ -14,7 +14,6 @@ _lock = threading.Lock()
 
 # 设置项 key 常量
 SETTING_GATEWAY_TOKEN = "gateway_token"
-SETTING_DEEPSEEK_KEY = "default_deepseek_key"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS providers (
@@ -429,12 +428,6 @@ def get_all_settings() -> dict:
 def get_gateway_token() -> str:
     """返回已配置的网关令牌，未配置返回空串。"""
     v = get_setting(SETTING_GATEWAY_TOKEN)
-    return v or ""
-
-
-def get_default_deepseek_key() -> str:
-    """返回已配置的默认 DeepSeek API Key，未配置返回空串。"""
-    v = get_setting(SETTING_DEEPSEEK_KEY)
     return v or ""
 
 
