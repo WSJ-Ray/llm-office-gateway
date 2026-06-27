@@ -57,8 +57,9 @@ export default function Dashboard() {
 
   const s = stats?.summary || { total: 0, errors: 0, input_tokens: 0, output_tokens: 0, total_input_tokens: 0, avg_ttft_ms: 0, avg_duration_ms: 0, cache_w: 0, cache_r: 0 }
   const errRate = s.total > 0 ? ((s.errors / s.total) * 100).toFixed(1) : '0.0'
-  const cacheHit = (Number(s.total_input_tokens) || 0) > 0
-    ? (((Number(s.cache_r) || 0) / (Number(s.total_input_tokens) || 0)) * 100).toFixed(1) + '%'
+  const cacheDenom = (Number(s.input_tokens) || 0) + (Number(s.cache_r) || 0) + (Number(s.cache_w) || 0)
+  const cacheHit = cacheDenom > 0
+    ? (((Number(s.cache_r) || 0) / cacheDenom) * 100).toFixed(1) + '%'
     : '—'
   const def = (providers?.data || []).find((p) => p.is_default) || (providers?.data || [])[0]
 
@@ -137,9 +138,10 @@ export default function Dashboard() {
           {byProvider.map((p) => {
             const pct = (p.count / maxProv) * 100
             const errPct = p.count > 0 ? (p.errors / p.count) * 100 : 0
-            const totalInput = p.total_input_tokens || (p.input_tokens + p.output_tokens + (p.cache_r || 0) + (p.cache_w || 0))
-            const cacheHit = totalInput > 0
-              ? ((p.cache_r / totalInput) * 100).toFixed(1) + '%'
+            const totalInput = (p.total_input_tokens ?? 0) || (p.input_tokens + p.output_tokens + (p.cache_r || 0) + (p.cache_w || 0))
+            const cacheDenom = (Number(p.input_tokens) || 0) + (Number(p.cache_r) || 0) + (Number(p.cache_w) || 0)
+            const cacheHit = cacheDenom > 0
+              ? ((p.cache_r / cacheDenom) * 100).toFixed(1) + '%'
               : '—'
             const hasCache = (p.cache_r || 0) + (p.cache_w || 0) > 0
             return (

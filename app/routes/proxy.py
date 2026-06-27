@@ -121,9 +121,8 @@ async def _proxy_nonstream(body, client_model, cands, t0):
     last_err = "all candidates failed"
     last_provider = cands[-1][0]
     last_upstream = cands[-1][1]
-    base_body = copy.deepcopy(body)
     for idx, (provider, upstream_model) in enumerate(cands):
-        candidate_body = copy.deepcopy(base_body)
+        candidate_body = copy.deepcopy(body)
         candidate_body["model"] = upstream_model
         candidate_body = _inject_system_cache(
             candidate_body,
@@ -190,10 +189,9 @@ def _proxy_stream(body, client_model, cands, t0):
         chosen_upstream = None
         final_status = 200
         final_error = None
-        base_body = copy.deepcopy(body)
 
         for idx, (provider, upstream_model) in enumerate(cands):
-            candidate_body = copy.deepcopy(base_body)
+            candidate_body = copy.deepcopy(body)
             candidate_body["model"] = upstream_model
             candidate_body = _inject_system_cache(
                 candidate_body,

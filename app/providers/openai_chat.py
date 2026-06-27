@@ -14,6 +14,7 @@ from ..translation import anthropic_to_openai_request
 from ..translation.o2a import (
     openai_to_anthropic_response,
     openai_stream_to_anthropic_sse,
+    _extract_openai_cache_r,
     _sse,
     _new_id,
     _block_id,
@@ -89,9 +90,9 @@ class OpenAIChatAdapter(BaseProvider):
         except Exception:
             return resp.content, ct, {"input_tokens": 0, "output_tokens": 0, "cache_w": 0, "cache_r": 0}, resp.status_code
         anth = openai_to_anthropic_response(oa, model)
-        usage = anth.get("usage", {})
-        oa_usage = oa.get("usage", {})
-        cached = oa_usage.get("prompt_tokens_cached", 0)
+        usage = anth.get("usage") or {}
+        oa_usage = oa.get("usage") or {}
+        cached = _extract_openai_cache_r(oa_usage)
         return json.dumps(anth).encode("utf-8"), "application/json", {
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
@@ -173,9 +174,9 @@ class OpenAIChatAdapter(BaseProvider):
                             return
 
                         anth = openai_to_anthropic_response(oa, model)
-                        usage = anth.get("usage", {})
-                        oa_usage = oa.get("usage", {})
-                        cached = oa_usage.get("prompt_tokens_cached", 0)
+                        usage = anth.get("usage") or {}
+                        oa_usage = oa.get("usage") or {}
+                        cached = _extract_openai_cache_r(oa_usage)
 
                         # 将翻译后的 Anthropic 响应拆成 SSE 事件产出
                         msg_id = anth.get("id", _new_id())
@@ -254,29 +255,13 @@ class OpenAIChatAdapter(BaseProvider):
                         return
 
                     # ── 标准 SSE 路径 ─────────────────────────────────
-                    # 从已收集的 raw 中解析 usage（含 prompt_tokens_cached）
-                    oa_usage_from_raw = {}
-                    try:
-                        raw_text = raw.decode("utf-8", "ignore")
-                        for line in raw_text.split("\n"):
-                            if line.startswith("data: ") and '"usage"' in line:
-                                try:
-                                    oa_usage_from_raw = json.loads(line[6:])["usage"]
-                                    break
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-                    cached_sse = oa_usage_from_raw.get("prompt_tokens_cached", 0)
-
                     async def _iter():
                         for i in range(0, len(raw), 8192):
                             yield raw[i:i+8192]
 
                     async for sse_chunk, u in openai_stream_to_anthropic_sse(_iter(), model):
                         if u is not None and "input_tokens" in u and "status" not in u:
-                            final_usage = u
-                            final_usage["cache_r"] = cached_sse
+                            final_usage = u  # cache_r 由 translator 在 final_usage 中传递
                         yield sse_chunk, None
         except (httpx.ReadError, httpx.RemoteProtocolError,
                 httpx.ConnectError, httpx.ReadTimeout, httpx.WriteError) as e:

@@ -2,9 +2,13 @@ import sqlite3
 import json
 import threading
 from contextlib import contextmanager
+from datetime import timedelta, timezone
 from typing import Optional
 
 from .config import DB_PATH
+
+TZ_SQL = '+8 hours'
+TZ = timezone(timedelta(hours=8))
 
 _lock = threading.Lock()
 
@@ -270,7 +274,8 @@ def insert_log(log: dict) -> int:
                 int(log.get("stream", False)),
                 log.get("status"), log.get("duration_ms"), log.get("ttft_ms"),
                 log.get("input_tokens", 0), log.get("output_tokens", 0),
-                log.get("input_tokens", 0) + log.get("output_tokens", 0) + log.get("cache_w", 0) + log.get("cache_r", 0),
+                (log.get("input_tokens") or 0) + (log.get("output_tokens") or 0)
+                + (log.get("cache_w") or 0) + (log.get("cache_r") or 0),
                 log.get("cache_w", 0), log.get("cache_r", 0),
                 log.get("error"),
             ),
@@ -280,13 +285,12 @@ def insert_log(log: dict) -> int:
 
 def list_logs(limit: int = 100, offset: int = 0) -> list[dict]:
     with _lock, get_conn() as conn:
-        # 使用 datetime(ts, '+8 hours') 将 UTC 转为 UTC+8 后展示
         rows = conn.execute(
-            "SELECT id, datetime(ts, '+8 hours') AS ts, provider_id, provider_name, "
+            "SELECT id, datetime(ts, ?) AS ts, provider_id, provider_name, "
             "client_model, upstream_model, stream, status, duration_ms, ttft_ms, "
             "input_tokens, output_tokens, total_input_tokens, cache_w, cache_r, error "
             "FROM request_logs ORDER BY id DESC LIMIT ? OFFSET ?",
-            (limit, offset),
+            (TZ_SQL, limit, offset),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -320,10 +324,8 @@ def stats_hourly(hours: int = 24) -> list[dict]:
     返回按时间正序排列的 [{hour, count, errors, input_tokens, output_tokens,
     total_input_tokens, cache_w, cache_r}]，缺失的小时补零。
     """
-    from datetime import datetime, timedelta, timezone
-    # 使用 UTC+8 生成 bucket 键
-    tz = timezone(timedelta(hours=8))
-    now = datetime.now(tz)
+    from datetime import datetime, timedelta
+    now = datetime.now(TZ)
     buckets: dict[str, dict] = {}
     for i in range(hours - 1, -1, -1):
         t = now - timedelta(hours=i)
@@ -339,15 +341,14 @@ def stats_hourly(hours: int = 24) -> list[dict]:
             "cache_r": 0,
         }
     with _lock, get_conn() as conn:
-        # SQLite 时间转换：datetime(ts, '+8 hours') 将 UTC 转为 UTC+8
         rows = conn.execute(
-            "SELECT substr(datetime(ts, '+8 hours'), 1, 13) h, COUNT(*) c, "
+            "SELECT substr(datetime(ts, ?), 1, 13) h, COUNT(*) c, "
             "SUM(CASE WHEN status>=400 OR error IS NOT NULL THEN 1 ELSE 0 END) e, "
             "COALESCE(SUM(input_tokens), 0) i, COALESCE(SUM(output_tokens), 0) o, "
             "COALESCE(SUM(total_input_tokens), 0) ti, "
             "COALESCE(SUM(cache_w), 0) cw, COALESCE(SUM(cache_r), 0) cr "
-            "FROM request_logs WHERE datetime(ts, '+8 hours') >= ? GROUP BY h",
-            ((now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:00:00"),),
+            "FROM request_logs WHERE ts >= ? GROUP BY h",
+            (TZ_SQL, (now - timedelta(hours=hours - 1)).strftime("%Y-%m-%d %H:00:00")),
         ).fetchall()
     for r in rows:
         if r["h"] in buckets:

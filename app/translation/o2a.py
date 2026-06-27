@@ -27,6 +27,27 @@ def _sse(event: str, data: dict) -> bytes:
     return f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
 
 
+def _extract_openai_cache_r(usage) -> int:
+    """从 OpenAI 兼容 usage dict 提取缓存读 tokens。
+
+    优先级：
+    1. prompt_tokens_details.cached_tokens（OpenAI 标准）
+    2. prompt_cache_hit_tokens（DeepSeek）
+    3. prompt_tokens_cached（旧版 / 其他）
+    """
+    if not isinstance(usage, dict):
+        return 0
+    details = usage.get("prompt_tokens_details")
+    if isinstance(details, dict):
+        val = details.get("cached_tokens")
+        if val:
+            return val
+    val = usage.get("prompt_cache_hit_tokens")
+    if val:
+        return val
+    return usage.get("prompt_tokens_cached") or 0
+
+
 def openai_to_anthropic_response(payload: dict, model: str) -> dict:
     """将非流式的 OpenAI Chat Completions 响应翻译为 Anthropic Messages 响应。"""
     choice = (payload.get("choices") or [{}])[0]
@@ -85,7 +106,7 @@ async def openai_stream_to_anthropic_sse(
     pending_tool_args = ""
     tool_id = ""
     tool_name = ""
-    final_usage: dict = {"input_tokens": 0, "output_tokens": 0}
+    final_usage: dict = {"input_tokens": 0, "output_tokens": 0, "cache_r": 0}
     finish_reason: str | None = None
     response_id = ""
     model_name = model
@@ -215,6 +236,7 @@ async def openai_stream_to_anthropic_sse(
             final_usage = {
                 "input_tokens": u.get("prompt_tokens", 0),
                 "output_tokens": u.get("completion_tokens", 0),
+                "cache_r": _extract_openai_cache_r(u),
             }
 
     # 收尾：关闭所有已打开的 content block
@@ -241,5 +263,5 @@ async def openai_stream_to_anthropic_sse(
         "input_tokens": final_usage["input_tokens"],
         "output_tokens": final_usage["output_tokens"],
         "cache_w": 0,
-        "cache_r": 0,
+        "cache_r": final_usage["cache_r"],
     }

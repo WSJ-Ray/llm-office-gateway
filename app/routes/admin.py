@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request, HTTPException
 
 from .. import db
 from ..auth import verify_auth
+from ..cache import model_cache
 from ..schemas import (
     ProviderIn,
     ProviderUpdate,
@@ -56,6 +57,7 @@ async def update_provider(pid: int, payload: ProviderUpdate, request: Request):
     if not db.get_provider(pid):
         raise HTTPException(404, "Provider not found")
     db.update_provider(pid, data)
+    model_cache.invalidate(pid)
     if data.get("is_default"):
         db.set_default_provider(pid)
     return {"ok": True}
@@ -65,6 +67,7 @@ async def update_provider(pid: int, payload: ProviderUpdate, request: Request):
 async def delete_provider(pid: int, request: Request):
     verify_auth(request)
     db.delete_provider(pid)
+    model_cache.invalidate(pid)
     return {"ok": True}
 
 
@@ -75,12 +78,19 @@ async def test_provider(pid: int, request: Request):
     p = db.get_provider(pid)
     if not p:
         raise HTTPException(404, "Provider not found")
+
+    cached = model_cache.get(pid)
+    if cached is not None:
+        return {"ok": True, "models": len(cached), "latency_ms": 0, "cached": True}
+
     from ..providers import get_adapter
     t0 = time.time()
     try:
         adapter = get_adapter(p)
         models = await adapter.list_models()
-        return {"ok": True, "models": len(models), "latency_ms": int((time.time() - t0) * 1000)}
+        result = [m["id"] for m in models if m.get("id")]
+        model_cache.set(pid, result)
+        return {"ok": True, "models": len(result), "latency_ms": int((time.time() - t0) * 1000), "cached": False}
     except Exception as e:
         raise HTTPException(502, f"Test failed: {e}")
 
@@ -92,11 +102,18 @@ async def provider_models(pid: int, request: Request):
     p = db.get_provider(pid)
     if not p:
         raise HTTPException(404, "Provider not found")
+
+    cached = model_cache.get(pid)
+    if cached is not None:
+        return {"ok": True, "models": cached, "cached": True}
+
     from ..providers import get_adapter
     try:
         adapter = get_adapter(p)
         models = await adapter.list_models()
-        return {"ok": True, "models": [m["id"] for m in models if m.get("id")]}
+        result = [m["id"] for m in models if m.get("id")]
+        model_cache.set(pid, result)
+        return {"ok": True, "models": result, "cached": False}
     except Exception as e:
         return {"ok": False, "error": str(e)[:200], "models": []}
 
@@ -108,6 +125,12 @@ async def preview_models(payload: PreviewModelsIn, request: Request):
     fmt = payload.format
     if fmt not in REGISTRY:
         raise HTTPException(400, f"Unsupported format: {fmt}")
+
+    cache_key = f"{fmt}|{payload.base_url}|{payload.api_key}"
+    cached = model_cache.get_preview(cache_key)
+    if cached is not None:
+        return {"ok": True, "models": cached, "latency_ms": 0, "cached": True}
+
     from ..providers import get_adapter
     cfg = {
         "id": 0,
@@ -124,10 +147,13 @@ async def preview_models(payload: PreviewModelsIn, request: Request):
     try:
         adapter = get_adapter(cfg)
         models = await adapter.list_models()
+        result = [m["id"] for m in models]
+        model_cache.set_preview(cache_key, result)
         return {
             "ok": True,
-            "models": [m["id"] for m in models],
+            "models": result,
             "latency_ms": int((time.time() - t0) * 1000),
+            "cached": False,
         }
     except Exception as e:
         return {"ok": False, "error": str(e)[:200]}

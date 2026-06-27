@@ -111,7 +111,7 @@ export default function Logs() {
               {l.input_tokens || 0} / {l.output_tokens || 0}
             </div>
             <div className="w-[100px] font-mono text-[11px] text-text-muted">
-              {l.total_input_tokens || (l.input_tokens || 0) + (l.output_tokens || 0) + (l.cache_r || 0) + (l.cache_w || 0)}
+              {(l.total_input_tokens ?? 0) || (l.input_tokens || 0) + (l.output_tokens || 0) + (l.cache_r || 0) + (l.cache_w || 0)}
             </div>
             <div
               className={`w-[110px] font-mono text-[11px] ${

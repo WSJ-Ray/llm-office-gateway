@@ -27,6 +27,30 @@ def _empty_usage() -> dict:
     return {"input_tokens": 0, "output_tokens": 0, "cache_w": 0, "cache_r": 0}
 
 
+def _extract_cache_w(u: dict) -> int:
+    """从 Anthropic 兼容 usage dict 中提取缓存写入 tokens。
+
+    优先级：
+    1. cache_creation_input_tokens（标准 Anthropic）
+    2. claude_cache_creation_5_m_tokens + claude_cache_creation_1_h_tokens（NewAPI 平铺）
+    3. cache_creation.ephemeral_5m_input_tokens + ephemeral_1h_input_tokens（NewAPI 嵌套）
+
+    各字段用 `or 0` 防御 JSON null 值。
+    """
+    cache_w = u.get("cache_creation_input_tokens", 0)
+    if cache_w:
+        return cache_w
+    v5 = u.get("claude_cache_creation_5_m_tokens") or 0
+    v1h = u.get("claude_cache_creation_1_h_tokens") or 0
+    cache_w = v5 + v1h
+    if cache_w:
+        return cache_w
+    cc = u.get("cache_creation") or {}
+    v5 = cc.get("ephemeral_5m_input_tokens") or 0
+    v1h = cc.get("ephemeral_1h_input_tokens") or 0
+    return v5 + v1h
+
+
 def _extract_usage(block: bytes, usage: dict) -> None:
     """从一段 SSE 事件块中提取 usage，原地更新 usage。
 
@@ -55,31 +79,28 @@ def _extract_usage(block: bytes, usage: dict) -> None:
     etype = obj.get("type")
     if etype == "message_start":
         u = (obj.get("message") or {}).get("usage") or {}
-        # 缓存写入：优先取 cache_creation_input_tokens，NewAPI 也会同时返回
-        # cache_creation.ephemeral_5m_input_tokens + ephemeral_1h_input_tokens
-        # 或平铺字段 claude_cache_creation_5_m_tokens / claude_cache_creation_1_h_tokens
-        cache_w = u.get("cache_creation_input_tokens", 0)
-        if not cache_w:
-            # 兼容 NewAPI 的平铺字段（5m + 1h 累加）
-            cache_w = (
-                u.get("claude_cache_creation_5_m_tokens", 0)
-                + u.get("claude_cache_creation_1_h_tokens", 0)
-            )
-        if not cache_w:
-            # 兼容 NewAPI 的 cache_creation 嵌套对象
-            cc = u.get("cache_creation") or {}
-            cache_w = (
-                cc.get("ephemeral_5m_input_tokens", 0)
-                + cc.get("ephemeral_1h_input_tokens", 0)
-            )
-        usage["input_tokens"] = u.get("input_tokens", 0) or 0
-        usage["cache_w"] = cache_w or 0
-        usage["cache_r"] = u.get("cache_read_input_tokens", 0) or 0
-        usage["output_tokens"] = u.get("output_tokens", 0) or 0
+        # 只在新值非零时覆盖，避免第二个 message_start 事件清零首次捕获值
+        new_input = u.get("input_tokens", 0) or 0
+        if new_input:
+            usage["input_tokens"] = new_input
+        usage["cache_w"] = _extract_cache_w(u)
+        new_cr = u.get("cache_read_input_tokens", 0) or 0
+        if new_cr:
+            usage["cache_r"] = new_cr
+        new_out = u.get("output_tokens", 0) or 0
+        if new_out:
+            usage["output_tokens"] = new_out
     elif etype == "message_delta":
         u = obj.get("usage") or {}
         if u.get("output_tokens") is not None:
             usage["output_tokens"] = u["output_tokens"]
+        # 某些 NewAPI 变体将 cache 字段放在 delta 事件中
+        delta_cw = _extract_cache_w(u)
+        if delta_cw:
+            usage["cache_w"] = delta_cw
+        delta_cr = u.get("cache_read_input_tokens") or 0
+        if delta_cr:
+            usage["cache_r"] = delta_cr
 
 
 class AnthropicAdapter(BaseProvider):
@@ -142,26 +163,13 @@ class AnthropicAdapter(BaseProvider):
         usage = _empty_usage()
         try:
             rj = resp.json()
-            u = rj.get("usage", {}) or {}
-            # 兼容 NewAPI：cache_creation_input_tokens 也可能来自
-            # cache_creation.ephemeral_*_input_tokens 嵌套或平铺字段
-            cache_w = u.get("cache_creation_input_tokens", 0)
-            if not cache_w:
-                cache_w = (
-                    u.get("claude_cache_creation_5_m_tokens", 0)
-                    + u.get("claude_cache_creation_1_h_tokens", 0)
-                )
-            if not cache_w:
-                cc = u.get("cache_creation") or {}
-                cache_w = (
-                    cc.get("ephemeral_5m_input_tokens", 0)
-                    + cc.get("ephemeral_1h_input_tokens", 0)
-                )
+            u = rj.get("usage") or {}
+            cache_w = _extract_cache_w(u)
             usage = {
-                "input_tokens": u.get("input_tokens", 0),
-                "output_tokens": u.get("output_tokens", 0),
+                "input_tokens": u.get("input_tokens") or 0,
+                "output_tokens": u.get("output_tokens") or 0,
                 "cache_w": cache_w,
-                "cache_r": u.get("cache_read_input_tokens", 0),
+                "cache_r": u.get("cache_read_input_tokens") or 0,
             }
         except Exception:
             pass
