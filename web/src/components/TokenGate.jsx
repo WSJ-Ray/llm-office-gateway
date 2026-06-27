@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { setToken, getToken, getSetupStatus } from '../lib/api'
 
 export default function TokenGate({ children }) {
   const [token, setLocal] = useState(getToken() || '')
+  const location = useLocation()
   const { data: status, isLoading } = useQuery({
     queryKey: ['setup-status'],
     queryFn: getSetupStatus,
@@ -14,8 +15,8 @@ export default function TokenGate({ children }) {
   // 未完成加载时直接渲染 children（避免闪烁）
   if (isLoading) return children
 
-  // 后端未配置令牌 → 引导到设置页
-  if (status && !status.configured) {
+  // 后端未配置令牌 → 引导到设置页（仅当不在设置页时重定向）
+  if (status && !status.configured && location.pathname !== '/settings') {
     return <Navigate to="/settings" replace />
   }
 
