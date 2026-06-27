@@ -17,8 +17,10 @@ const Metric = ({ label, value, sub, valueClass = '' }) => (
 const Bar = ({ h, max }) => {
   const pct = max > 0 ? (h.count / max) * 100 : 0
   const hasErr = h.errors > 0
+  const cacheTotal = (h.cache_r || 0) + (h.cache_w || 0)
+  const cacheInfo = cacheTotal > 0 ? ` · 缓存 ${fmtNum(cacheTotal)}` : ''
   return (
-    <div className="flex-1 flex flex-col items-center gap-1 group relative" title={`${h.hour} · ${h.count} 次${h.errors ? `（${h.errors} 错误）` : ''}`}>
+    <div className="flex-1 flex flex-col items-center gap-1 group relative" title={`${h.hour} · ${h.count} 次${h.errors ? `（${h.errors} 错误）` : ''}${cacheInfo}`}>
       <div className="w-full flex flex-col justify-end h-44">
         <div
           className={`w-full rounded-t ${hasErr ? 'bg-danger' : 'bg-primary'} opacity-80 group-hover:opacity-100 transition-opacity`}
@@ -53,11 +55,10 @@ export default function Dashboard() {
     refetchInterval: 5000
   })
 
-  const s = stats?.summary || { total: 0, errors: 0, input_tokens: 0, output_tokens: 0, avg_ttft_ms: 0, avg_duration_ms: 0, cache_w: 0, cache_r: 0 }
+  const s = stats?.summary || { total: 0, errors: 0, input_tokens: 0, output_tokens: 0, total_input_tokens: 0, avg_ttft_ms: 0, avg_duration_ms: 0, cache_w: 0, cache_r: 0 }
   const errRate = s.total > 0 ? ((s.errors / s.total) * 100).toFixed(1) : '0.0'
-  const totalInput = (Number(s.input_tokens) || 0) + (Number(s.cache_w) || 0) + (Number(s.cache_r) || 0)
-  const cacheHit = totalInput > 0
-    ? (((Number(s.cache_r) || 0) / totalInput) * 100).toFixed(1) + '%'
+  const cacheHit = (Number(s.total_input_tokens) || 0) > 0
+    ? (((Number(s.cache_r) || 0) / (Number(s.total_input_tokens) || 0)) * 100).toFixed(1) + '%'
     : '—'
   const def = (providers?.data || []).find((p) => p.is_default) || (providers?.data || [])[0]
 
@@ -136,6 +137,11 @@ export default function Dashboard() {
           {byProvider.map((p) => {
             const pct = (p.count / maxProv) * 100
             const errPct = p.count > 0 ? (p.errors / p.count) * 100 : 0
+            const totalInput = p.total_input_tokens || (p.input_tokens + p.output_tokens + (p.cache_r || 0) + (p.cache_w || 0))
+            const cacheHit = totalInput > 0
+              ? ((p.cache_r / totalInput) * 100).toFixed(1) + '%'
+              : '—'
+            const hasCache = (p.cache_r || 0) + (p.cache_w || 0) > 0
             return (
               <div key={p.name} className="space-y-1.5">
                 <div className="flex justify-between text-[12px]">
@@ -147,6 +153,7 @@ export default function Dashboard() {
                 </div>
                 <div className="text-[10px] text-text-muted font-mono">
                   入 {fmtNum(p.input_tokens)} · 出 {fmtNum(p.output_tokens)} · TTFT {fmtMs(p.avg_ttft_ms)}
+                  {hasCache && <span className="text-success"> · 缓存 {cacheHit}</span>}
                 </div>
               </div>
             )

@@ -4,6 +4,7 @@
 未映射的模型回退到默认提供商。一个 client_model 可能映射到多个启用的提供商，
 按 priority 排序；上游失败时网关自动故障转移到下一个候选。
 """
+import copy
 import json
 import time
 from datetime import datetime
@@ -94,17 +95,45 @@ async def proxy_messages(request: Request):
     return _proxy_stream(body, client_model, cands, t0)
 
 
+def _inject_system_cache(body: dict, provider_format: str, provider_extra: dict) -> dict:
+    """对支持 Anthropic 缓存的提供商，在 system prompt 中注入 cache_control 标记。
+
+    返回新的 body 副本，避免修改原始请求体导致故障转移时累积标记。
+    """
+    if not provider_extra.get("enable_prompt_caching"):
+        return body
+    if provider_format not in ("anthropic", "url_adaptive"):
+        return body
+    mutated = copy.deepcopy(body)
+    system = mutated.get("system")
+    if system:
+        if isinstance(system, str):
+            mutated["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        elif isinstance(system, list):
+            for block in mutated["system"]:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    block["cache_control"] = {"type": "ephemeral"}
+    return mutated
+
+
 async def _proxy_nonstream(body, client_model, cands, t0):
     last_status = 502
     last_err = "all candidates failed"
     last_provider = cands[-1][0]
     last_upstream = cands[-1][1]
+    base_body = copy.deepcopy(body)
     for idx, (provider, upstream_model) in enumerate(cands):
-        body["model"] = upstream_model
+        candidate_body = copy.deepcopy(base_body)
+        candidate_body["model"] = upstream_model
+        candidate_body = _inject_system_cache(
+            candidate_body,
+            provider["format"],
+            provider.get("extra_config", {}),
+        )
         adapter = get_adapter(provider)
         is_last = idx == len(cands) - 1
         try:
-            content, ct, usage, status = await adapter.send(body)
+            content, ct, usage, status = await adapter.send(candidate_body)
         except Exception as e:
             _log(f"[FAIL] {provider['name']}/{upstream_model} 异常: {e}")
             last_err = str(e)[:200]
@@ -161,12 +190,19 @@ def _proxy_stream(body, client_model, cands, t0):
         chosen_upstream = None
         final_status = 200
         final_error = None
+        base_body = copy.deepcopy(body)
 
         for idx, (provider, upstream_model) in enumerate(cands):
-            body["model"] = upstream_model
+            candidate_body = copy.deepcopy(base_body)
+            candidate_body["model"] = upstream_model
+            candidate_body = _inject_system_cache(
+                candidate_body,
+                provider["format"],
+                provider.get("extra_config", {}),
+            )
             adapter = get_adapter(provider)
             is_last = idx == len(cands) - 1
-            gen = adapter.stream(body)
+            gen = adapter.stream(candidate_body)
             committed = False
             try:
                 async for chunk, meta in gen:

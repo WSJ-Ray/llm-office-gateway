@@ -32,6 +32,13 @@ def _extract_usage(block: bytes, usage: dict) -> None:
 
     Anthropic 流式 SSE 在 message_start 携带 input/cache 字段，
     在 message_delta 携带最终 output_tokens。解析失败或非相关事件时静默跳过。
+
+    兼容 NewAPI（QuantumNous/new-api）的额外字段：
+    - cache_creation.ephemeral_5m_input_tokens
+    - cache_creation.ephemeral_1h_input_tokens
+    - claude_cache_creation_5_m_tokens / claude_cache_creation_1_h_tokens
+
+    注意：即使字段值为 0 也要覆盖，避免前一次请求的缓存值被错误保留。
     """
     data: bytes | None = None
     for line in block.split(b"\n"):
@@ -48,14 +55,27 @@ def _extract_usage(block: bytes, usage: dict) -> None:
     etype = obj.get("type")
     if etype == "message_start":
         u = (obj.get("message") or {}).get("usage") or {}
-        if u.get("input_tokens"):
-            usage["input_tokens"] = u["input_tokens"]
-        if u.get("cache_creation_input_tokens"):
-            usage["cache_w"] = u["cache_creation_input_tokens"]
-        if u.get("cache_read_input_tokens"):
-            usage["cache_r"] = u["cache_read_input_tokens"]
-        if u.get("output_tokens"):
-            usage["output_tokens"] = u["output_tokens"]
+        # 缓存写入：优先取 cache_creation_input_tokens，NewAPI 也会同时返回
+        # cache_creation.ephemeral_5m_input_tokens + ephemeral_1h_input_tokens
+        # 或平铺字段 claude_cache_creation_5_m_tokens / claude_cache_creation_1_h_tokens
+        cache_w = u.get("cache_creation_input_tokens", 0)
+        if not cache_w:
+            # 兼容 NewAPI 的平铺字段（5m + 1h 累加）
+            cache_w = (
+                u.get("claude_cache_creation_5_m_tokens", 0)
+                + u.get("claude_cache_creation_1_h_tokens", 0)
+            )
+        if not cache_w:
+            # 兼容 NewAPI 的 cache_creation 嵌套对象
+            cc = u.get("cache_creation") or {}
+            cache_w = (
+                cc.get("ephemeral_5m_input_tokens", 0)
+                + cc.get("ephemeral_1h_input_tokens", 0)
+            )
+        usage["input_tokens"] = u.get("input_tokens", 0) or 0
+        usage["cache_w"] = cache_w or 0
+        usage["cache_r"] = u.get("cache_read_input_tokens", 0) or 0
+        usage["output_tokens"] = u.get("output_tokens", 0) or 0
     elif etype == "message_delta":
         u = obj.get("usage") or {}
         if u.get("output_tokens") is not None:
@@ -123,10 +143,24 @@ class AnthropicAdapter(BaseProvider):
         try:
             rj = resp.json()
             u = rj.get("usage", {}) or {}
+            # 兼容 NewAPI：cache_creation_input_tokens 也可能来自
+            # cache_creation.ephemeral_*_input_tokens 嵌套或平铺字段
+            cache_w = u.get("cache_creation_input_tokens", 0)
+            if not cache_w:
+                cache_w = (
+                    u.get("claude_cache_creation_5_m_tokens", 0)
+                    + u.get("claude_cache_creation_1_h_tokens", 0)
+                )
+            if not cache_w:
+                cc = u.get("cache_creation") or {}
+                cache_w = (
+                    cc.get("ephemeral_5m_input_tokens", 0)
+                    + cc.get("ephemeral_1h_input_tokens", 0)
+                )
             usage = {
                 "input_tokens": u.get("input_tokens", 0),
                 "output_tokens": u.get("output_tokens", 0),
-                "cache_w": u.get("cache_creation_input_tokens", 0),
+                "cache_w": cache_w,
                 "cache_r": u.get("cache_read_input_tokens", 0),
             }
         except Exception:
@@ -155,13 +189,12 @@ class AnthropicAdapter(BaseProvider):
                 async for chunk in resp.aiter_bytes():
                     if first and chunk:
                         first = False
-                    # 已提交：正常转发上游事件
                     buf += chunk
                     while b"\n\n" in buf:
                         event_block, buf = buf.split(b"\n\n", 1)
                         _extract_usage(event_block, usage)
                     yield chunk, None
-        # 流结束后解析残余缓冲，兜底捕获末尾事件
-        if buf:
-            _extract_usage(buf, usage)
+                # 流正常结束后，解析残余缓冲（可能有最后一个事件但没有尾部 \n\n）
+                if buf:
+                    _extract_usage(buf, usage)
         yield b"", {**usage, "_eof": True, "ttft_ms": int((time.time() - t0) * 1000) if not first else 0}

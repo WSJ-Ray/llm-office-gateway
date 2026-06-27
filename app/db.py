@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
     ttft_ms INTEGER,
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
+    total_input_tokens INTEGER DEFAULT 0,
     cache_w INTEGER DEFAULT 0,
     cache_r INTEGER DEFAULT 0,
     error TEXT
@@ -82,6 +83,20 @@ def _migrate(conn) -> None:
             "UPDATE model_mappings SET priority = ("
             " SELECT COUNT(*) FROM model_mappings m2 "
             " WHERE m2.client_model = model_mappings.client_model AND m2.id < model_mappings.id)"
+        )
+
+
+def _migrate_total_input_tokens() -> None:
+    """为旧库补齐 total_input_tokens 列，并回填已有数据。"""
+    with _lock, get_conn() as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(request_logs)")}
+        if "total_input_tokens" in cols:
+            return
+        conn.execute("ALTER TABLE request_logs ADD COLUMN total_input_tokens INTEGER DEFAULT 0")
+        # 回填已有数据：total = input_tokens + output_tokens + cache_w + cache_r
+        conn.execute(
+            "UPDATE request_logs SET total_input_tokens = "
+            "(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_w, 0) + COALESCE(cache_r, 0))"
         )
 
 
@@ -246,14 +261,16 @@ def insert_log(log: dict) -> int:
     with _lock, get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO request_logs(provider_id, provider_name, client_model, upstream_model, "
-            "stream, status, duration_ms, ttft_ms, input_tokens, output_tokens, cache_w, cache_r, error) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "stream, status, duration_ms, ttft_ms, input_tokens, output_tokens, total_input_tokens, "
+            "cache_w, cache_r, error) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 log.get("provider_id"), log.get("provider_name"),
                 log.get("client_model"), log.get("upstream_model"),
                 int(log.get("stream", False)),
                 log.get("status"), log.get("duration_ms"), log.get("ttft_ms"),
                 log.get("input_tokens", 0), log.get("output_tokens", 0),
+                log.get("input_tokens", 0) + log.get("output_tokens", 0) + log.get("cache_w", 0) + log.get("cache_r", 0),
                 log.get("cache_w", 0), log.get("cache_r", 0),
                 log.get("error"),
             ),
@@ -263,8 +280,12 @@ def insert_log(log: dict) -> int:
 
 def list_logs(limit: int = 100, offset: int = 0) -> list[dict]:
     with _lock, get_conn() as conn:
+        # 使用 datetime(ts, '+8 hours') 将 UTC 转为 UTC+8 后展示
         rows = conn.execute(
-            "SELECT * FROM request_logs ORDER BY id DESC LIMIT ? OFFSET ?",
+            "SELECT id, datetime(ts, '+8 hours') AS ts, provider_id, provider_name, "
+            "client_model, upstream_model, stream, status, duration_ms, ttft_ms, "
+            "input_tokens, output_tokens, total_input_tokens, cache_w, cache_r, error "
+            "FROM request_logs ORDER BY id DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
     return [dict(r) for r in rows]
@@ -276,7 +297,7 @@ def stats_summary() -> dict:
         errors = conn.execute("SELECT COUNT(*) c FROM request_logs WHERE status>=400 OR error IS NOT NULL").fetchone()["c"]
         agg = conn.execute(
             "SELECT COALESCE(SUM(input_tokens),0) i, COALESCE(SUM(output_tokens),0) o, "
-            "COALESCE(AVG(ttft_ms),0) t, COALESCE(AVG(duration_ms),0) d, "
+            "COALESCE(SUM(total_input_tokens),0) ti, COALESCE(AVG(ttft_ms),0) t, COALESCE(AVG(duration_ms),0) d, "
             "COALESCE(SUM(cache_w),0) cw, COALESCE(SUM(cache_r),0) cr FROM request_logs"
         ).fetchone()
     return {
@@ -284,6 +305,7 @@ def stats_summary() -> dict:
         "errors": errors,
         "input_tokens": agg["i"],
         "output_tokens": agg["o"],
+        "total_input_tokens": agg["ti"],
         "avg_ttft_ms": int(agg["t"] or 0),
         "avg_duration_ms": int(agg["d"] or 0),
         "cache_w": agg["cw"],
@@ -292,26 +314,39 @@ def stats_summary() -> dict:
 
 
 def stats_hourly(hours: int = 24) -> list[dict]:
-    """按小时聚合最近 hours 小时的请求量与错误数。
+    """按小时聚合最近 hours 小时的请求量、错误数、token 与缓存用量。
 
-    SQLite CURRENT_TIMESTAMP 以 UTC 存储，故此处用 UTC 生成 bucket 键与下界，
-    保证与 ts 字段对齐。返回按时间正序排列的 [{hour, count, errors,
-    input_tokens, output_tokens}]，缺失的小时补零。
+    SQLite CURRENT_TIMESTAMP 以 UTC 存储，但在查询时转换为 UTC+8 以匹配前端展示。
+    返回按时间正序排列的 [{hour, count, errors, input_tokens, output_tokens,
+    total_input_tokens, cache_w, cache_r}]，缺失的小时补零。
     """
-    from datetime import datetime, timedelta
-    now = datetime.utcnow()
+    from datetime import datetime, timedelta, timezone
+    # 使用 UTC+8 生成 bucket 键
+    tz = timezone(timedelta(hours=8))
+    now = datetime.now(tz)
     buckets: dict[str, dict] = {}
     for i in range(hours - 1, -1, -1):
         t = now - timedelta(hours=i)
         key = t.strftime("%Y-%m-%d %H")
-        buckets[key] = {"hour": t.strftime("%H:00"), "count": 0, "errors": 0,
-                        "input_tokens": 0, "output_tokens": 0}
+        buckets[key] = {
+            "hour": t.strftime("%H:00"),
+            "count": 0,
+            "errors": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_input_tokens": 0,
+            "cache_w": 0,
+            "cache_r": 0,
+        }
     with _lock, get_conn() as conn:
+        # SQLite 时间转换：datetime(ts, '+8 hours') 将 UTC 转为 UTC+8
         rows = conn.execute(
-            "SELECT substr(ts,1,13) h, COUNT(*) c, "
+            "SELECT substr(datetime(ts, '+8 hours'), 1, 13) h, COUNT(*) c, "
             "SUM(CASE WHEN status>=400 OR error IS NOT NULL THEN 1 ELSE 0 END) e, "
-            "COALESCE(SUM(input_tokens),0) i, COALESCE(SUM(output_tokens),0) o "
-            "FROM request_logs WHERE ts >= ? GROUP BY h",
+            "COALESCE(SUM(input_tokens), 0) i, COALESCE(SUM(output_tokens), 0) o, "
+            "COALESCE(SUM(total_input_tokens), 0) ti, "
+            "COALESCE(SUM(cache_w), 0) cw, COALESCE(SUM(cache_r), 0) cr "
+            "FROM request_logs WHERE datetime(ts, '+8 hours') >= ? GROUP BY h",
             ((now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:00:00"),),
         ).fetchall()
     for r in rows:
@@ -320,17 +355,22 @@ def stats_hourly(hours: int = 24) -> list[dict]:
             buckets[r["h"]]["errors"] = r["e"]
             buckets[r["h"]]["input_tokens"] = r["i"]
             buckets[r["h"]]["output_tokens"] = r["o"]
+            buckets[r["h"]]["total_input_tokens"] = r["ti"]
+            buckets[r["h"]]["cache_w"] = r["cw"]
+            buckets[r["h"]]["cache_r"] = r["cr"]
     return list(buckets.values())
 
 
 def stats_by_provider() -> list[dict]:
-    """按提供商聚合请求量、错误数与 token 用量。"""
+    """按提供商聚合请求量、错误数、token 与缓存用量。"""
     with _lock, get_conn() as conn:
         rows = conn.execute(
             "SELECT provider_name, COUNT(*) c, "
             "SUM(CASE WHEN status>=400 OR error IS NOT NULL THEN 1 ELSE 0 END) e, "
-            "COALESCE(SUM(input_tokens),0) i, COALESCE(SUM(output_tokens),0) o, "
-            "COALESCE(AVG(ttft_ms),0) t "
+            "COALESCE(SUM(input_tokens), 0) i, COALESCE(SUM(output_tokens), 0) o, "
+            "COALESCE(SUM(total_input_tokens), 0) ti, "
+            "COALESCE(SUM(cache_w), 0) cw, COALESCE(SUM(cache_r), 0) cr, "
+            "COALESCE(AVG(ttft_ms), 0) t "
             "FROM request_logs WHERE provider_name IS NOT NULL "
             "GROUP BY provider_name ORDER BY c DESC"
         ).fetchall()
@@ -341,6 +381,9 @@ def stats_by_provider() -> list[dict]:
             "errors": r["e"],
             "input_tokens": r["i"],
             "output_tokens": r["o"],
+            "total_input_tokens": r["ti"],
+            "cache_w": r["cw"],
+            "cache_r": r["cr"],
             "avg_ttft_ms": int(r["t"] or 0),
         }
         for r in rows

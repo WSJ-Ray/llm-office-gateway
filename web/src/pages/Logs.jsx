@@ -86,6 +86,7 @@ export default function Logs() {
           <div className="w-[70px]">首字</div>
           <div className="w-[80px]">总耗时</div>
           <div className="w-[140px]">入/出 tokens</div>
+          <div className="w-[100px]">总量</div>
           <div className="w-[110px]">缓存 r/w</div>
           <div className="w-[70px]">状态</div>
         </div>
@@ -108,6 +109,9 @@ export default function Logs() {
             <div className="w-[80px] font-mono text-[11px] text-text-primary">{fmtMs(l.duration_ms)}</div>
             <div className="w-[140px] font-mono text-[11px] text-text-secondary">
               {l.input_tokens || 0} / {l.output_tokens || 0}
+            </div>
+            <div className="w-[100px] font-mono text-[11px] text-text-muted">
+              {l.total_input_tokens || (l.input_tokens || 0) + (l.output_tokens || 0) + (l.cache_r || 0) + (l.cache_w || 0)}
             </div>
             <div
               className={`w-[110px] font-mono text-[11px] ${

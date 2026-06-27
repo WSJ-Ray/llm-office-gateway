@@ -29,6 +29,7 @@ def _seed_defaults() -> None:
 
 def create_app() -> FastAPI:
     db.init_db()
+    db._migrate_total_input_tokens()
     _seed_defaults()
 
     app = FastAPI(title="Office Gateway")

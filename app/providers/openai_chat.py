@@ -90,11 +90,13 @@ class OpenAIChatAdapter(BaseProvider):
             return resp.content, ct, {"input_tokens": 0, "output_tokens": 0, "cache_w": 0, "cache_r": 0}, resp.status_code
         anth = openai_to_anthropic_response(oa, model)
         usage = anth.get("usage", {})
+        oa_usage = oa.get("usage", {})
+        cached = oa_usage.get("prompt_tokens_cached", 0)
         return json.dumps(anth).encode("utf-8"), "application/json", {
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
             "cache_w": 0,
-            "cache_r": 0,
+            "cache_r": cached,
         }, resp.status_code
 
     async def stream(self, body: dict) -> AsyncIterator[tuple[bytes, dict | None]]:
@@ -172,6 +174,8 @@ class OpenAIChatAdapter(BaseProvider):
 
                         anth = openai_to_anthropic_response(oa, model)
                         usage = anth.get("usage", {})
+                        oa_usage = oa.get("usage", {})
+                        cached = oa_usage.get("prompt_tokens_cached", 0)
 
                         # 将翻译后的 Anthropic 响应拆成 SSE 事件产出
                         msg_id = anth.get("id", _new_id())
@@ -238,18 +242,33 @@ class OpenAIChatAdapter(BaseProvider):
                             "input_tokens": usage.get("input_tokens", 0),
                             "output_tokens": usage.get("output_tokens", 0),
                             "cache_w": 0,
-                            "cache_r": 0,
+                            "cache_r": cached,
                         }
                         final_usage = {
                             "input_tokens": usage.get("input_tokens", 0),
                             "output_tokens": usage.get("output_tokens", 0),
-                            "cache_w": 0, "cache_r": 0,
+                            "cache_w": 0, "cache_r": cached,
                         }
                         ttft_ms = int((time.time() - t0) * 1000)
                         yield b"", {**final_usage, "_eof": True, "ttft_ms": ttft_ms}
                         return
 
                     # ── 标准 SSE 路径 ─────────────────────────────────
+                    # 从已收集的 raw 中解析 usage（含 prompt_tokens_cached）
+                    oa_usage_from_raw = {}
+                    try:
+                        raw_text = raw.decode("utf-8", "ignore")
+                        for line in raw_text.split("\n"):
+                            if line.startswith("data: ") and '"usage"' in line:
+                                try:
+                                    oa_usage_from_raw = json.loads(line[6:])["usage"]
+                                    break
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    cached_sse = oa_usage_from_raw.get("prompt_tokens_cached", 0)
+
                     async def _iter():
                         for i in range(0, len(raw), 8192):
                             yield raw[i:i+8192]
@@ -257,6 +276,7 @@ class OpenAIChatAdapter(BaseProvider):
                     async for sse_chunk, u in openai_stream_to_anthropic_sse(_iter(), model):
                         if u is not None and "input_tokens" in u and "status" not in u:
                             final_usage = u
+                            final_usage["cache_r"] = cached_sse
                         yield sse_chunk, None
         except (httpx.ReadError, httpx.RemoteProtocolError,
                 httpx.ConnectError, httpx.ReadTimeout, httpx.WriteError) as e:
@@ -290,5 +310,9 @@ class OpenAIChatAdapter(BaseProvider):
             return
         if final_usage is None:
             final_usage = {"input_tokens": 0, "output_tokens": 0, "cache_w": 0, "cache_r": 0}
+        if "cache_r" not in final_usage:
+            final_usage["cache_r"] = 0
+        if "cache_w" not in final_usage:
+            final_usage["cache_w"] = 0
         ttft_ms = int((time.time() - t0) * 1000) if first_byte else 0
         yield b"", {**final_usage, "_eof": True, "ttft_ms": ttft_ms}

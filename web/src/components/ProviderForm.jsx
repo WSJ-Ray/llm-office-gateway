@@ -19,7 +19,8 @@ export default function ProviderForm({ provider, onClose }) {
     base_url: provider?.base_url || '',
     api_key: provider?.api_key || '',
     enabled: provider?.enabled ?? true,
-    is_default: provider?.is_default ?? false
+    is_default: provider?.is_default ?? false,
+    extra_config: provider?.extra_config || {}
   })
   const [models, setModels] = useState(null)
   const [fetching, setFetching] = useState(false)
@@ -194,6 +195,14 @@ export default function ProviderForm({ provider, onClose }) {
               on={form.is_default}
               onChange={(v) => set('is_default', v)}
             />
+            {(form.format === 'anthropic' || form.format === 'url_adaptive') && (
+              <Sw
+                label="启用 Prompt 缓存"
+                desc="在 system prompt 中注入 cache_control 标记，利用上游内容缓存降低延迟和费用"
+                on={!!form.extra_config.enable_prompt_caching}
+                onChange={(v) => setForm((f) => ({ ...f, extra_config: { ...f.extra_config, enable_prompt_caching: v } }))}
+              />
+            )}
           </div>
 
           {err && <div className="text-[12px] text-danger">保存失败：{err}</div>}
