@@ -9,6 +9,6 @@ DB_PATH = str(DATA_DIR / "gateway.db")
 STATIC_DIR = BASE_DIR / "static"
 
 GATEWAY_TOKEN = os.getenv("GATEWAY_TOKEN", "123")
-DEFAULT_DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-replaced")
+DEFAULT_DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 DEFAULT_PROVIDER_TIMEOUT = 120
