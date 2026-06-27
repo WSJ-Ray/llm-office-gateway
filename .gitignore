@@ -13,6 +13,11 @@ start_litellm.ps1
 # ===== 遗留配置 =====
 litellm_config.yaml
 
+# ===== 调试/一次性脚本 =====
+analyze_*.py
+test_*.py
+check_*.py
+
 # ===== 环境变量与密钥 =====
 .env
 *.env
